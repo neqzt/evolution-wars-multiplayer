@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: evolution-wars-multiplayer
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start
+    healthCheckPath: /
