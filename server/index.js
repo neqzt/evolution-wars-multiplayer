@@ -72,7 +72,7 @@ wss.on('connection', (ws) => {
       if (player.room) leave(player);
       let roomCode; do { roomCode = code(); } while (rooms.has(roomCode));
       const room = { code: roomCode, host: player.id, players: [player], commands: [], running: false, timer: null,
-        config: { mode: '1v1', map: 'river-split', difficulty: 'medium', colors: [1, 0] } };
+        config: { mode: '1v1', map: 'river-split', difficulty: 'medium', colors: [1, 0], fog: false } };
       player.name = String(msg.name || 'Spieler').slice(0, 20); player.team = 0; player.room = room;
       rooms.set(roomCode, room); console.log(`[lobby] ${player.name} created ${roomCode}`); update(room); return;
     }
@@ -90,7 +90,8 @@ wss.on('connection', (ws) => {
       if (!/^([1-4])v([1-4])$/.test(mode)) return;
       room.config = { mode, map: ['river-split', 'western-mountain', 'jungle-swamp'].includes(msg.config?.map) ? msg.config.map : room.config.map,
         difficulty: ['easy', 'medium', 'hard', 'extreme'].includes(msg.config?.difficulty) ? msg.config.difficulty : room.config.difficulty,
-        colors: Array.isArray(msg.config?.colors) ? msg.config.colors.slice(0, teamCount(mode)) : room.config.colors };
+        colors: Array.isArray(msg.config?.colors) ? msg.config.colors.slice(0, teamCount(mode)) : room.config.colors,
+        fog: !!msg.config?.fog };
       for (const p of room.players) if (p.team >= teamCount(mode)) p.team = null;
       assignDefaults(room); update(room); return;
     }
