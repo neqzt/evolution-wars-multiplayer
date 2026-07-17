@@ -102,7 +102,20 @@ wss.on('connection', (ws) => {
       }
       return;
     }
-    if (msg.type === 'ready' && !room.running) { player.ready = !!msg.ready; update(room); return; }
+    if (msg.type === 'set-color' && !room.running) {
+      const color = Number(msg.color);
+      if (Number.isInteger(color) && color >= 0 && color <= 7) {
+        room.config.colors[player.team] = color;
+        update(room);
+      }
+      return;
+    }
+    if (msg.type === 'ready' && !room.running) {
+      player.ready = !!msg.ready;
+      update(room);
+      if (player.ready && room.players.length > 0 && room.players.every((p) => p.ready)) start(room);
+      return;
+    }
     if (msg.type === 'start' && player.id === room.host && !room.running) { start(room); return; }
     if (msg.type === 'command' && room.running && msg.command && typeof msg.command === 'object') {
       room.commands.push({ playerId: player.id, command: msg.command }); return;
