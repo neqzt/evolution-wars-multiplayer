@@ -1,17 +1,119 @@
+// Evolution Wars: schlanker WebSocket-Server für private Lobbys und Lockstep.
 import { WebSocketServer } from 'ws';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-const port=Number(process.env.PORT||8787);
-const http=createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end(JSON.stringify({service:'Evolution Wars Multiplayer',status:'online'}));});
-const wss=new WebSocketServer({server:http}),rooms=new Map();
-const code=()=>randomBytes(4).toString('hex').toUpperCase();
-const send=(ws,m)=>ws.readyState===ws.OPEN&&ws.send(JSON.stringify(m));
-const count=m=>/^([1-4])v([1-4])$/.test(m)?m.split('v').reduce((a,n)=>a+Number(n),0):2;
-const state=r=>({type:'lobby',code:r.code,host:r.host,config:r.config,players:r.players.map(p=>({id:p.id,name:p.name,team:p.team,ready:p.ready,host:p.id===r.host})),running:r.running});
-const broadcast=(r,m)=>r.players.forEach(p=>send(p.ws,m));
-const update=r=>broadcast(r,state(r));
-function assign(r){const used=new Set(r.players.map(p=>p.team).filter(t=>t!==null));for(const p of r.players)if(p.team===null||p.team>=count(r.config.mode)){p.team=Array.from({length:count(r.config.mode)},(_,i)=>i).find(t=>!used.has(t));used.add(p.team);}}
-function leave(p){const r=p.room;if(!r)return;r.players=r.players.filter(x=>x!==p);if(!r.players.length){clearInterval(r.timer);rooms.delete(r.code);return;}if(r.host===p.id)r.host=r.players[0].id;update(r);}
-function start(r){assign(r);r.running=true;const players=r.players.map(p=>({id:p.id,team:p.team,name:p.name}));broadcast(r,{type:'match-start',config:r.config,seed:Math.floor(Math.random()*1e9),players,startsAt:Date.now()+1800});setTimeout(()=>{if(r.running)r.timer=setInterval(()=>broadcast(r,{type:'tick',commands:r.commands.splice(0)}),50);},1800);}
-wss.on('connection',ws=>{const p={id:randomBytes(8).toString('hex'),name:'Spieler',team:null,ready:false,room:null,ws};send(ws,{type:'welcome',id:p.id});ws.on('message',raw=>{let m;try{m=JSON.parse(raw)}catch{return}if(m.type==='create'){let c;do{c=code()}while(rooms.has(c));const r={code:c,host:p.id,players:[p],commands:[],running:false,timer:null,config:{mode:'1v1',map:'river-split',difficulty:'medium',colors:[1,0]}};p.name=String(m.name||'Spieler').slice(0,20);p.team=0;p.room=r;rooms.set(c,r);update(r);return;}const r=p.room;if(m.type==='join'){const x=rooms.get(String(m.code||'').trim().toUpperCase());if(!x||x.running||x.players.length>=8)return send(ws,{type:'error',message:'Lobby nicht gefunden, gestartet oder voll.'});p.name=String(m.name||'Spieler').slice(0,20);p.room=x;x.players.push(p);assign(x);update(x);return;}if(!r)return;if(m.type==='config'&&p.id===r.host&&!r.running){const mode=String(m.config?.mode||r.config.mode);if(!/^([1-4])v([1-4])$/.test(mode))return;r.config={mode,map:['river-split','western-mountain','jungle-swamp'].includes(m.config?.map)?m.config.map:r.config.map,difficulty:['easy','medium','hard','extreme'].includes(m.config?.difficulty)?m.config.difficulty:r.config.difficulty,colors:Array.isArray(m.config?.colors)?m.config.colors.slice(0,count(mode)):r.config.colors};assign(r);update(r);return;}if(m.type==='set-team'&&p.id===r.host&&!r.running){const q=r.players.find(x=>x.id===m.playerId),t=Number(m.team);if(q&&Number.isInteger(t)&&t>=0&&t<count(r.config.mode)&&!r.players.some(x=>x!==q&&x.team===t)){q.team=t;update(r)}return;}if(m.type==='ready'&&!r.running){p.ready=!!m.ready;update(r);return;}if(m.type==='start'&&p.id===r.host&&!r.running){start(r);return;}if(m.type==='command'&&r.running&&m.command&&typeof m.command==='object'){r.commands.push({playerId:p.id,command:m.command});return;}if(m.type==='chat'&&typeof m.text==='string')broadcast(r,{type:'chat',name:p.name,text:m.text.slice(0,160)});});ws.on('close',()=>leave(p));});
-http.listen(port,()=>console.log('Evolution Wars server on '+port));
+
+const port = Number(process.env.PORT || 8787);
+const httpServer = createServer((request, response) => {
+  response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  response.end(JSON.stringify({ service: 'Evolution Wars Multiplayer', status: 'online' }));
+});
+const wss = new WebSocketServer({ server: httpServer });
+const rooms = new Map();
+const code = () => randomBytes(4).toString('hex').toUpperCase();
+const send = (ws, message) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(message));
+const broadcast = (room, message) => room.players.forEach((p) => send(p.ws, message));
+const teamCount = (mode) => /^([1-4])v([1-4])$/.test(mode) ? mode.split('v').reduce((a, n) => a + Number(n), 0) : 2;
+const publicPlayer = (p) => ({ id: p.id, name: p.name, team: p.team, ready: p.ready, host: p.id === p.room.host });
+function lobbyState(room) {
+  return { type: 'lobby', code: room.code, host: room.host, config: room.config,
+    players: room.players.map(publicPlayer), running: room.running };
+}
+function update(room) { broadcast(room, lobbyState(room)); }
+function leave(player) {
+  const room = player?.room;
+  if (!room) return;
+  console.log(`[leave] ${player.name} left lobby ${room.code}`);
+  room.players = room.players.filter((p) => p !== player);
+  if (!room.players.length) {
+    if (room.timer) clearInterval(room.timer);
+    rooms.delete(room.code);
+    console.log(`[lobby] ${room.code} closed`);
+    return;
+  }
+  if (room.host === player.id) room.host = room.players[0].id;
+  for (const p of room.players) if (p.team !== null && p.team >= teamCount(room.config.mode)) p.team = null;
+  update(room);
+}
+function assignDefaults(room) {
+  const total = teamCount(room.config.mode);
+  const used = new Set(room.players.map((p) => p.team).filter((t) => t !== null));
+  for (const p of room.players) {
+    if (p.team === null || p.team >= total) {
+      p.team = Array.from({ length: total }, (_, i) => i).find((t) => !used.has(t));
+      used.add(p.team);
+    }
+  }
+}
+function start(room) {
+  assignDefaults(room);
+  const assigned = room.players.map((p) => ({ id: p.id, team: p.team, name: p.name }));
+  room.running = true;
+  room.seed = Math.floor(Math.random() * 1_000_000_000);
+  console.log(`[match] ${room.code} started with ${room.players.length} human player(s), ${room.config.mode}`);
+  broadcast(room, { type: 'match-start', config: room.config, seed: room.seed, players: assigned, startsAt: Date.now() + 1800 });
+  setTimeout(() => {
+    if (!room.running) return;
+    room.timer = setInterval(() => {
+      const commands = room.commands.splice(0);
+      broadcast(room, { type: 'tick', commands });
+    }, 50);
+  }, 1800);
+}
+
+wss.on('connection', (ws) => {
+  const player = { id: randomBytes(8).toString('hex'), name: 'Spieler', team: null, ready: false, room: null, ws };
+  console.log(`[connect] player ${player.id} connected`);
+  send(ws, { type: 'welcome', id: player.id });
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.type === 'create') {
+      if (player.room) leave(player);
+      let roomCode; do { roomCode = code(); } while (rooms.has(roomCode));
+      const room = { code: roomCode, host: player.id, players: [player], commands: [], running: false, timer: null,
+        config: { mode: '1v1', map: 'river-split', difficulty: 'medium', colors: [1, 0] } };
+      player.name = String(msg.name || 'Spieler').slice(0, 20); player.team = 0; player.room = room;
+      rooms.set(roomCode, room); console.log(`[lobby] ${player.name} created ${roomCode}`); update(room); return;
+    }
+    if (msg.type === 'join') {
+      const room = rooms.get(String(msg.code || '').trim().toUpperCase());
+      if (!room || room.running || room.players.length >= 8) return send(ws, { type: 'error', message: 'Lobby nicht gefunden, bereits gestartet oder voll.' });
+      if (player.room) leave(player);
+      player.name = String(msg.name || 'Spieler').slice(0, 20); player.room = room; player.team = null;
+      room.players.push(player); assignDefaults(room); console.log(`[lobby] ${player.name} joined ${room.code}`); update(room); return;
+    }
+    const room = player.room;
+    if (!room) return;
+    if (msg.type === 'config' && player.id === room.host && !room.running) {
+      const mode = String(msg.config?.mode || room.config.mode);
+      if (!/^([1-4])v([1-4])$/.test(mode)) return;
+      room.config = { mode, map: ['river-split', 'western-mountain', 'jungle-swamp'].includes(msg.config?.map) ? msg.config.map : room.config.map,
+        difficulty: ['easy', 'medium', 'hard', 'extreme'].includes(msg.config?.difficulty) ? msg.config.difficulty : room.config.difficulty,
+        colors: Array.isArray(msg.config?.colors) ? msg.config.colors.slice(0, teamCount(mode)) : room.config.colors };
+      for (const p of room.players) if (p.team >= teamCount(mode)) p.team = null;
+      assignDefaults(room); update(room); return;
+    }
+    if (msg.type === 'set-team' && player.id === room.host && !room.running) {
+      const target = room.players.find((p) => p.id === msg.playerId);
+      const team = Number(msg.team);
+      if (target && Number.isInteger(team) && team >= 0 && team < teamCount(room.config.mode) && !room.players.some((p) => p !== target && p.team === team)) {
+        target.team = team; update(room);
+      }
+      return;
+    }
+    if (msg.type === 'ready' && !room.running) { player.ready = !!msg.ready; update(room); return; }
+    if (msg.type === 'start' && player.id === room.host && !room.running) { start(room); return; }
+    if (msg.type === 'command' && room.running && msg.command && typeof msg.command === 'object') {
+      room.commands.push({ playerId: player.id, command: msg.command }); return;
+    }
+    if (msg.type === 'chat' && typeof msg.text === 'string') broadcast(room, { type: 'chat', name: player.name, text: msg.text.slice(0, 160) });
+  });
+  ws.on('error', (error) => console.error(`[socket] ${player.name} error: ${error.message}`));
+  ws.on('close', (statusCode) => {
+    console.log(`[disconnect] ${player.name} closed (${statusCode})`);
+    leave(player);
+  });
+});
+
+httpServer.listen(port, () => console.log(`Evolution Wars server on ${port}`));
