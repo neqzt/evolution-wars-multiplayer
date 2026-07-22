@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT || 8787);
-const MULTIPLAYER_PROTOCOL = 'ew-2026-07-22-sync-v9';
+const MULTIPLAYER_PROTOCOL = 'ew-2026-07-23-sync-v10';
 const SYNC_PARTS = ['core', 'teams', 'units', 'buildings', 'projectiles', 'world', 'timers'];
 // Ein normaler HTTP-Endpunkt ist wichtig für Cloud-Hosts: Er dient als
 // Health-Check, die WebSocket-Verbindungen werden auf demselben Port erweitert.
@@ -18,7 +18,8 @@ const rooms = new Map();
 const code = () => randomBytes(4).toString('hex').toUpperCase();
 const COMMAND_TYPES = new Set(['move', 'explore', 'gather', 'mine', 'build', 'placeBuilding', 'produce', 'setRally', 'trade',
   'specialize', 'research', 'attack', 'attackBuilding', 'garrison', 'garrisonTower', 'militia', 'ungarrison',
-  'advanceAge', 'chooseAgeReward', 'deployTowerWagon', 'setVillageReward', 'claimTreasure', 'repair', 'demolish', 'mapPing', 'aiGrant', 'aiResetUnits']);
+  'advanceAge', 'chooseAgeReward', 'chooseStartReward', 'setBuildOrderMode', 'deployTowerWagon', 'deployHutWagon',
+  'setVillageReward', 'claimTreasure', 'repair', 'demolish', 'mapPing', 'aiGrant', 'aiResetUnits']);
 const AI_ONLY_COMMANDS = new Set(['aiGrant', 'aiResetUnits']);
 function validCommand(command) {
   if (!command || typeof command !== 'object' || !COMMAND_TYPES.has(command.type)) return false;
