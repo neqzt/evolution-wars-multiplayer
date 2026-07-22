@@ -5,7 +5,8 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT || 8787);
-const MULTIPLAYER_PROTOCOL = 'ew-2026-07-22-sync-v5';
+const MULTIPLAYER_PROTOCOL = 'ew-2026-07-22-sync-v6';
+const SYNC_PARTS = ['core', 'teams', 'units', 'buildings', 'projectiles', 'world', 'timers'];
 // Ein normaler HTTP-Endpunkt ist wichtig für Cloud-Hosts: Er dient als
 // Health-Check, die WebSocket-Verbindungen werden auf demselben Port erweitert.
 const httpServer = createServer((request, response) => {
@@ -317,23 +318,31 @@ wss.on('connection', (ws) => {
       const seq = Number(msg.seq);
       const hash = typeof msg.hash === 'string' ? msg.hash.slice(0, 16) : '';
       if (!Number.isInteger(seq) || seq < Math.max(0, room.tickSeq - 600) || seq > room.tickSeq || !/^[0-9a-f]{8,16}$/i.test(hash)) return;
+      const parts = {};
+      for (const key of SYNC_PARTS) {
+        const value = msg.parts?.[key];
+        if (typeof value === 'string' && /^[0-9a-f]{8,16}$/i.test(value)) parts[key] = value;
+      }
       let reports = room.syncReports.get(seq);
       if (!reports) { reports = new Map(); room.syncReports.set(seq, reports); }
-      reports.set(player.id, hash);
+      reports.set(player.id, { hash, parts });
       // Vor Tick 1 müssen ausnahmslos alle gestarteten Spieler verbunden sein
       // und dieselbe fertig aufgebaute Welt melden.
       const participants = seq === 0
         ? room.players
         : room.players.filter((entry) => entry.ws && entry.ws.readyState === 1);
       if (participants.length > 1 && participants.every((entry) => reports.has(entry.id))) {
-        const hashes = new Set(participants.map((entry) => reports.get(entry.id)));
+        const hashes = new Set(participants.map((entry) => reports.get(entry.id).hash));
         if (hashes.size > 1) {
           console.error(`[desync] ${room.code} at tick ${seq}`);
+          const differingParts = SYNC_PARTS.filter((key) =>
+            new Set(participants.map((entry) => reports.get(entry.id).parts[key]).filter(Boolean)).size > 1);
+          const detail = differingParts.length ? ` Abweichend: ${differingParts.join(', ')}.` : '';
           room.startBlocked = true;
           if (room.timer) { clearInterval(room.timer); room.timer = null; }
           broadcast(room, { type: 'sync-error', seq, message: seq === 0
-            ? 'Unterschiedliche Ausgangswelten erkannt. Die Partie wurde vor Tick 1 angehalten. Alle Spieler müssen die aktuelle HTML neu öffnen.'
-            : `Synchronisationsfehler bei Tick ${seq}. Die Partie wurde angehalten, damit niemand einen anderen Spielverlauf sieht.` });
+            ? `Unterschiedliche Ausgangswelten erkannt.${detail} Die Partie wurde vor Tick 1 angehalten. Alle Spieler müssen die aktuelle HTML neu öffnen.`
+            : `Synchronisationsfehler bei Tick ${seq}.${detail} Die Partie wurde angehalten, damit niemand einen anderen Spielverlauf sieht.` });
         } else if (seq === 0) {
           beginTicks(room);
         }
