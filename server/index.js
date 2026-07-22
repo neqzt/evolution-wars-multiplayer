@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT || 8787);
-const MULTIPLAYER_PROTOCOL = 'ew-2026-07-22-sync-v4';
+const MULTIPLAYER_PROTOCOL = 'ew-2026-07-22-sync-v5';
 // Ein normaler HTTP-Endpunkt ist wichtig für Cloud-Hosts: Er dient als
 // Health-Check, die WebSocket-Verbindungen werden auf demselben Port erweitert.
 const httpServer = createServer((request, response) => {
@@ -181,7 +181,7 @@ function start(room) {
   room.startBlocked = false;
   room.seed = Math.floor(Math.random() * 1_000_000_000);
   console.log(`[match] ${room.code} started with ${room.players.length} human player(s), ${room.config.mode}`);
-  broadcast(room, { type: 'match-start', config: room.config, seed: room.seed, players: assigned });
+  broadcast(room, { type: 'match-start', config: room.config, seed: room.seed, players: assigned, host: room.host });
 }
 
 wss.on('connection', (ws) => {
@@ -294,6 +294,14 @@ wss.on('connection', (ws) => {
     }
     if (msg.type === 'command' && room.running && validCommand(msg.command) && Number.isInteger(player.matchTeam)) {
       room.commands.push({ playerId: player.id, team: player.matchTeam, command: msg.command }); return;
+    }
+    if (msg.type === 'ai-command' && room.running && player.id === room.host && validCommand(msg.command)) {
+      const aiTeam = Number(msg.command.team);
+      const humanOwnsTeam = room.players.some((entry) => entry.matchTeam === aiTeam);
+      if (Number.isInteger(aiTeam) && aiTeam >= 0 && aiTeam < teamCount(room.config.mode) && !humanOwnsTeam) {
+        room.commands.push({ playerId: player.id, team: aiTeam, command: msg.command });
+      }
+      return;
     }
     if (msg.type === 'replay' && room.running) {
       const now = Date.now();
