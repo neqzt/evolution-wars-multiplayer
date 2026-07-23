@@ -5,7 +5,6 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT || 8787);
-const MULTIPLAYER_PROTOCOL = 'ew-2026-07-23-sync-v13';
 const SYNC_PARTS = ['core', 'teams', 'units', 'buildings', 'projectiles', 'world', 'timers'];
 // Ein normaler HTTP-Endpunkt ist wichtig für Cloud-Hosts: Er dient als
 // Health-Check, die WebSocket-Verbindungen werden auf demselben Port erweitert.
@@ -190,15 +189,18 @@ function start(room) {
 wss.on('connection', (ws) => {
   let player = { id: randomBytes(8).toString('hex'), token: randomBytes(24).toString('hex'), name: 'Spieler', side: 0, color: 0, ready: false, room: null, ws };
   console.log(`[connect] player ${player.id} connected`);
-  send(ws, { type: 'welcome', id: player.id, token: player.token, protocol: MULTIPLAYER_PROTOCOL });
+  send(ws, { type: 'welcome', id: player.id, token: player.token });
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
-    if (['create', 'join', 'resume'].includes(msg.type) && msg.protocol !== MULTIPLAYER_PROTOCOL) {
-      return send(ws, { type: 'error', code: 'version-mismatch', message: 'Andere Spielversion erkannt. Alle Spieler müssen dieselbe aktuelle Evolution-Wars-HTML verwenden.' });
-    }
+    // Versionsprüfung PRO LOBBY statt gegen eine feste Server-Version: Der
+    // Lobby-Ersteller legt die Spielversion fest, Beitreten/Fortsetzen braucht
+    // dieselbe. So funktioniert jedes Spiel-Update ohne Server-Redeploy.
+    const clientProtocol = typeof msg.protocol === 'string' ? msg.protocol.slice(0, 80) : '';
+    const versionError = () => send(ws, { type: 'error', code: 'version-mismatch', message: 'Andere Spielversion erkannt. Alle Spieler müssen dieselbe aktuelle Evolution-Wars-HTML verwenden.' });
     if (msg.type === 'resume') {
       const room = rooms.get(String(msg.code || '').trim().toUpperCase());
+      if (room && room.protocol !== clientProtocol) return versionError();
       const existing = room?.players.find((entry) => entry.token === msg.token);
       if (!room?.running || !existing) return send(ws, { type: 'resume-failed' });
       player = existing; player.ws = ws; player.disconnectedAt = null;
@@ -213,12 +215,14 @@ wss.on('connection', (ws) => {
       if (player.room) leave(player);
       let roomCode; do { roomCode = code(); } while (rooms.has(roomCode));
       const room = { code: roomCode, host: player.id, players: [player], ais: [], aiSeq: 1, commands: [], running: false, timer: null,
+        protocol: clientProtocol,
         config: { mode: '1v1', map: 'river-split', difficulty: 'medium', colors: [1, 0], fog: false } };
       player.name = String(msg.name || 'Spieler').slice(0, 20); player.side = 0; player.color = 1; player.room = room;
       rooms.set(roomCode, room); console.log(`[lobby] ${player.name} created ${roomCode}`); update(room); return;
     }
     if (msg.type === 'join') {
       const room = rooms.get(String(msg.code || '').trim().toUpperCase());
+      if (room && room.protocol !== clientProtocol) return versionError();
       if (!room || room.running || room.players.length >= teamCount(room?.config?.mode || '1v1')) return send(ws, { type: 'error', message: 'Lobby nicht gefunden, bereits gestartet oder für diesen Modus voll.' });
       if (player.room) leave(player);
       player.name = String(msg.name || 'Spieler').slice(0, 20); player.room = room;
