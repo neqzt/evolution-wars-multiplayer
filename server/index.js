@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT || 8787);
-const MULTIPLAYER_PROTOCOL = 'ew-2026-07-23-sync-v10';
+const MULTIPLAYER_PROTOCOL = 'ew-2026-07-23-sync-v11';
 const SYNC_PARTS = ['core', 'teams', 'units', 'buildings', 'projectiles', 'world', 'timers'];
 // Ein normaler HTTP-Endpunkt ist wichtig für Cloud-Hosts: Er dient als
 // Health-Check, die WebSocket-Verbindungen werden auf demselben Port erweitert.
@@ -103,7 +103,7 @@ function applyRoomConfig(room, input) {
   if (teamCount(mode) < room.players.length) return { ok: false, message: 'Dieser Modus hat zu wenige Plätze für die aktuelle Lobby.' };
   room.config = {
     mode,
-    map: ['river-split', 'western-mountain', 'winterland', 'jungle-swamp'].includes(input?.map) ? input.map : room.config.map,
+    map: ['river-split', 'western-mountain', 'winterland', 'jungle-swamp', 'the-island'].includes(input?.map) ? input.map : room.config.map,
     difficulty: ['easy', 'medium', 'hard', 'extreme'].includes(input?.difficulty) ? input.difficulty : room.config.difficulty,
     colors: Array.isArray(input?.colors) ? input.colors.slice(0, teamCount(mode)) : room.config.colors,
     fog: !!input?.fog,
@@ -235,7 +235,7 @@ wss.on('connection', (ws) => {
     }
     if (msg.type === 'config-hint' && player.id === room.host && !room.running) {
       const map = String(msg.map || '');
-      if (['river-split', 'western-mountain', 'winterland', 'jungle-swamp'].includes(map)) {
+      if (['river-split', 'western-mountain', 'winterland', 'jungle-swamp', 'the-island'].includes(map)) {
         broadcast(room, { type: 'config-hint', playerId: player.id, map });
       }
       return;
