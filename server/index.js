@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 
 const port = Number(process.env.PORT || 8787);
-const MULTIPLAYER_PROTOCOL = 'ew-2026-07-23-sync-v11';
+const MULTIPLAYER_PROTOCOL = 'ew-2026-07-23-sync-v12';
 const SYNC_PARTS = ['core', 'teams', 'units', 'buildings', 'projectiles', 'world', 'timers'];
 // Ein normaler HTTP-Endpunkt ist wichtig für Cloud-Hosts: Er dient als
 // Health-Check, die WebSocket-Verbindungen werden auf demselben Port erweitert.
